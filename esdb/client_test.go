@@ -1,6 +1,12 @@
 package esdb_test
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/EventStore/EventStore-Client-Go/v2/esdb"
+	"github.com/stretchr/testify/assert"
+)
 
 func TestSingleNode(t *testing.T) {
 	// Empty database container
@@ -33,6 +39,8 @@ func TestSingleNode(t *testing.T) {
 	PersistentSubReadTests(t, emptyContainerClient)
 	PersistentSubTests(t, emptyContainerClient, populatedContainerClient)
 	TLSTests(t, emptyContainer)
+
+	Closing(t, emptyContainerClient)
 }
 
 func TestClusterNode(t *testing.T) {
@@ -49,4 +57,14 @@ func TestClusterNode(t *testing.T) {
 	DeleteTests(t, db)
 	PersistentSubReadTests(t, db)
 	PersistentSubTests(t, db, nil)
+}
+
+func Closing(t *testing.T, client *esdb.Client) {
+	client.Close()
+
+	_, err := client.AppendToStream(context.Background(), NAME_GENERATOR.Generate(), esdb.AppendToStreamOptions{}, createTestEvent())
+
+	esdbErr, _ := esdb.FromError(err)
+	assert.Error(t, esdbErr)
+	assert.Equal(t, esdb.ErrorConnectionClosed, esdbErr.Code())
 }

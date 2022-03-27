@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 type EndPoint struct {
@@ -64,10 +65,14 @@ func ParseEndPoint(s string) (*EndPoint, error) {
 
 func NewGrpcClient(config Configuration) *grpcClient {
 	channel := make(chan msg)
+	closeFlag := new(int32)
 
-	go connectionStateMachine(config, channel)
+	atomic.StoreInt32(closeFlag, 0)
+
+	go connectionStateMachine(config, closeFlag, channel)
 
 	return &grpcClient{
-		channel: channel,
+		channel:   channel,
+		closeFlag: closeFlag,
 	}
 }

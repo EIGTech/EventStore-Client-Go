@@ -25,7 +25,7 @@ type ReadStream struct {
 
 type readStreamParams struct {
 	client   *grpcClient
-	handle   connectionHandle
+	handle   *connectionHandle
 	cancel   context.CancelFunc
 	inner    api.Streams_ReadClient
 	headers  metadata.MD

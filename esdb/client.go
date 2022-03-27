@@ -703,7 +703,7 @@ func readInternal(
 	parent context.Context,
 	client *Client,
 	options options,
-	handle connectionHandle,
+	handle *connectionHandle,
 	streamsClient api.StreamsClient,
 	readRequest *api.ReadReq,
 ) (*ReadStream, error) {

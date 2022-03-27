@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	gossipApi "github.com/EventStore/EventStore-Client-Go/v2/protos/gossip"
@@ -24,10 +25,11 @@ import (
 )
 
 type grpcClient struct {
-	channel chan msg
+	channel   chan msg
+	closeFlag *int32
 }
 
-func (client *grpcClient) handleError(handle connectionHandle, headers metadata.MD, trailers metadata.MD, err error) error {
+func (client *grpcClient) handleError(handle *connectionHandle, headers metadata.MD, trailers metadata.MD, err error) error {
 	values := trailers.Get("exception")
 
 	if values != nil && values[0] == "not-leader" {
@@ -78,19 +80,28 @@ func (client *grpcClient) handleError(handle connectionHandle, headers metadata.
 	return err
 }
 
-func (client *grpcClient) getConnectionHandle() (connectionHandle, error) {
+func (client *grpcClient) getConnectionHandle() (*connectionHandle, error) {
+	if atomic.LoadInt32(client.closeFlag) != 0 {
+		return nil, &Error{
+			code: ErrorConnectionClosed,
+			err:  fmt.Errorf("connection is closed"),
+		}
+	}
+
 	msg := newGetConnectionMsg()
 	client.channel <- msg
 
 	resp := <-msg.channel
 
-	return resp, resp.err
+	return &resp, resp.err
 }
 
 func (client *grpcClient) close() {
-	channel := make(chan bool)
-	client.channel <- closeConnection{channel}
-	<-channel
+	if atomic.LoadInt32(client.closeFlag) == 0 {
+		channel := make(chan bool)
+		client.channel <- closeConnection{channel}
+		<-channel
+	}
 }
 
 type getConnection struct {
@@ -170,11 +181,11 @@ type connectionHandle struct {
 	err        error
 }
 
-func (handle connectionHandle) Id() uuid.UUID {
+func (handle *connectionHandle) Id() uuid.UUID {
 	return handle.id
 }
 
-func (handle connectionHandle) Connection() *grpc.ClientConn {
+func (handle *connectionHandle) Connection() *grpc.ClientConn {
 	return handle.connection
 }
 
@@ -201,7 +212,7 @@ func newConnectionHandle(id uuid.UUID, serverInfo *ServerInfo, connection *grpc.
 	}
 }
 
-func connectionStateMachine(config Configuration, channel chan msg) {
+func connectionStateMachine(config Configuration, closeFlag *int32, channel chan msg) {
 	state := newConnectionState(config)
 
 	for {
@@ -216,10 +227,17 @@ func connectionStateMachine(config Configuration, channel chan msg) {
 							code: ErrorConnectionClosed,
 						},
 					}
+
+					atomic.StoreInt32(closeFlag, 1)
+					close(channel)
+					break
 				}
 			case closeConnection:
 				{
 					evt.channel <- true
+					atomic.StoreInt32(closeFlag, 1)
+					close(channel)
+					break
 				}
 			default:
 				// No-op
